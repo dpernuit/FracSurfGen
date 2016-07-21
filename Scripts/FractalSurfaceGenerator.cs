@@ -75,14 +75,17 @@ public class FractalSurfaceGenerator : MonoBehaviour
     // Avoid the abusive recreation of the mesh by the UI
     private bool        m_bMeshIsGenerating = false;
     private bool        m_bMeshNeedsRecreate = true;
-    private float       m_fMeshTimer = 0.0f;    
+    private float       m_fMeshTimer = 0.0f;
 
     // Initialisation
     void Start()
     {
         // Initialises the GO List and the HeightBuffer
         m_tGameObjects = new List<GameObject>();
-        m_tBuffer = null;
+
+        // Max Size is 2049
+        // Allocates the buffer once, and reuses it at each generation to save allocations.
+        m_tBuffer = new float[2049 * 2049];
 
         // Creating a new RNG
         m_nSeed = System.DateTime.Now.GetHashCode();
@@ -147,7 +150,10 @@ public class FractalSurfaceGenerator : MonoBehaviour
 
         // Destroy the Heightbuffer
         // delete[] m_tHeightBuffer
-        m_tBuffer = null;
+        
+        // Resets the buffer because we cant destroy it
+        for (int n = 0; n < m_tBuffer.Length; n++)
+            m_tBuffer[n] = 0;
 
         m_bMeshIsGenerating = false;
     }
@@ -169,12 +175,17 @@ public class FractalSurfaceGenerator : MonoBehaviour
         {
             // Calculates the Size from the complexity
             int nCurrentSize = (int)Mathf.Pow(2.0f, m_nComplexity) + 1;
+
+            // 2049 is the max size!
+            if (nCurrentSize > 2049)
+                nCurrentSize = 2049;
+
             m_nXSize = nCurrentSize;
             m_nYSize = nCurrentSize;
 
             // Allocates the point buffer
-            m_tBuffer = new float[m_nXSize * m_nYSize];
-
+            //m_tBuffer = new float[m_nXSize * m_nYSize];
+            
             // We need to initialise the four corners of the buffer with random values
             // This will "seed" the algorithm by giving us our first square
             float fCoeff = Mathf.Pow(nCurrentSize, (1 - m_fFractalDim));
@@ -222,8 +233,8 @@ public class FractalSurfaceGenerator : MonoBehaviour
     {
         // Verify the HeightBuffer's Size
         int nNumberOfVertices = m_nXSize * m_nYSize;
-        if (m_tBuffer.Length != nNumberOfVertices)
-            return;
+        //if (m_tBuffer.Length != nNumberOfVertices)
+        //    return;
 
         // As unity cannot support more than 255x255 vertices per mesh,
         // We may need to split the buffer to a grid
@@ -408,7 +419,8 @@ public class FractalSurfaceGenerator : MonoBehaviour
     private float GetAt(int nX, int nY)
     {
         int nIndex = nX + nY * m_nXSize;
-        if ((nIndex < 0) || (nIndex >= m_tBuffer.Length))
+        //if ((nIndex < 0) || (nIndex >= m_tBuffer.Length))
+        if ((nIndex < 0) || (nIndex >= (m_nXSize * m_nYSize)))
         {
             // Houston, we have a problem
             return 0.0f;
@@ -425,7 +437,8 @@ public class FractalSurfaceGenerator : MonoBehaviour
     private void SetAt(int nX, int nY, float fValue)
     {
         int nIndex = nX + nY * m_nXSize;
-        if ((nIndex < 0) || (nIndex >= m_tBuffer.Length))
+        //if ((nIndex < 0) || (nIndex >= m_tBuffer.Length))
+        if ((nIndex < 0) || (nIndex >= (m_nXSize * m_nYSize)))
             return;
 
         m_tBuffer[nIndex] = fValue;
