@@ -57,13 +57,24 @@ public class FractalSurfaceGenerator : MonoBehaviour
     // Adds a test to use the "best" diagonal to split the quad in 2
     public bool         m_bBetterMeshSplitting = true;
 
+    // Second pass "Multiply"
+    // Generates a second fractal pass
+    // The resulting fractal buffer will be the multiplication of both fractal passes
+    public bool         m_bMultiplyPass = true;
+
+    // Automatically scales the mesh according to the fractal dimensions
+    public bool         m_bAutoScale = false;
+
+    // Enables/Disables the first seeding pass
+    public bool         m_bFirstSeed = false;
+
     // Size of the result mesh
     // For now, XSize is always equal to YSize, and is (2^complexity)+1
     private int         m_nXSize;
     private int         m_nYSize;
 
     // FloatBuffer that will store the generated meshes "Altitudes"
-    private float[]     m_tBuffer;
+    private float[]     m_tFractalBuffer;
     
     // List of all the GameObjects Created by the algorithm
     // As unity cannot handle meshes bigger than 255x255
@@ -90,7 +101,7 @@ public class FractalSurfaceGenerator : MonoBehaviour
 
         // Max Size is 2049
         // Allocates the buffer once, and reuses it at each generation to save allocations.
-        m_tBuffer = new float[2049 * 2049];
+        m_tFractalBuffer = new float[2049 * 2049];
 
         // Creating a new RNG
         m_nSeed = System.DateTime.Now.GetHashCode();
@@ -124,7 +135,7 @@ public class FractalSurfaceGenerator : MonoBehaviour
             m_fMeshTimer = 0.0f;
         }
 
-        // R will force rebuild the Mesh with the same parameteres (for debug)
+        // R will force rebuild the Mesh with the same parameters
         if (Input.GetKeyDown(KeyCode.R))
         {
             // GetButtonDown is only called once
@@ -166,8 +177,8 @@ public class FractalSurfaceGenerator : MonoBehaviour
         // delete[] m_tHeightBuffer
         
         // Resets the buffer because we cant destroy it
-        for (int n = 0; n < m_tBuffer.Length; n++)
-            m_tBuffer[n] = 0;
+        for (int n = 0; n < m_tFractalBuffer.Length; n++)
+            m_tFractalBuffer[n] = 0;
 
         m_bMeshIsGenerating = false;
     }
@@ -186,50 +197,40 @@ public class FractalSurfaceGenerator : MonoBehaviour
         m_RNG = new System.Random(m_nSeed);
 
         // 1. Generate the new fractal surface in the float buffer
+        if(!m_bMultiplyPass)
         {
-            // Calculates the Size from the complexity
-            int nCurrentSize = (int)Mathf.Pow(2.0f, m_nComplexity) + 1;
+            // Simple pass generation
+            GenerateFractalSurface();
+        }            
+        else
+        {
+            // Two pass multiply
+            // 1.1 First fractal pass
+            GenerateFractalSurface();
 
-            // 2049 is the max size!
-            if (nCurrentSize > 2049)
-                nCurrentSize = 2049;
-
-            m_nXSize = nCurrentSize;
-            m_nYSize = nCurrentSize;
-
-            // Allocates the point buffer
-            //m_tBuffer = new float[m_nXSize * m_nYSize];
-            
-            // We need to initialise the four corners of the buffer with random values
-            // This will "seed" the algorithm by giving us our first square
-            float fCoeff = Mathf.Pow(nCurrentSize, (1 - m_fFractalDim));
-            SetAt(0, 0, fracRandNum(fCoeff));
-            SetAt(0, nCurrentSize-1, fracRandNum(fCoeff));
-            SetAt(nCurrentSize-1, 0, fracRandNum(fCoeff));
-            SetAt(nCurrentSize-1, nCurrentSize-1, fracRandNum(fCoeff));
-
-            // Uses the Diamond-Square algorithm to add ever-increasing details to the Buffer
-            // until we cannot reduced the iteration size.  
-            while (nCurrentSize > 1)
+            // 1.2 Copy of the first fractal to a temporary buffer
+            int nCurrentSize = m_tFractalBuffer.Length;
+            float[] tTempBuffer = new float[nCurrentSize];
+            for(int n = 0; n < nCurrentSize; n++)
             {
-                DoDiamondSquareStep(nCurrentSize);
-                nCurrentSize /= 2;
+                tTempBuffer[n] = m_tFractalBuffer[n];
+            }
+
+            // 1.3 Second pass Fractal
+            // We need to reset the RNG with a new seed in order to get the same
+            // result with different complexities
+            m_RNG = new System.Random(m_nSeed * 2);
+            GenerateFractalSurface();
+
+            // 1.4 Multiply First & Second pass
+            for (int n = 0; n < nCurrentSize; n++)
+            {
+                m_tFractalBuffer[n] = m_tFractalBuffer[n] * tTempBuffer[n];
             }
         }
 
         // 2. Generate GameObjects from the buffer
-        {
-            // We have to memorize and reset the parent scale
-            // so that the children get the proper scale when attached..
-            Vector3 vOldParentScale = m_ParentTransform.transform.localScale;
-            m_ParentTransform.transform.localScale = Vector3.one;
-
-            // Then we'll build all the meshes from the buffer
-            BuildAllGameObjectsFromBuffer();
-
-            // We can now restore the parent scale
-            m_ParentTransform.transform.localScale = vOldParentScale;
-        }
+        BuildAllGameObjectsFromBuffer();
 
         m_bMeshIsGenerating = false;
         m_bMeshNeedsRecreate = false;
@@ -245,6 +246,11 @@ public class FractalSurfaceGenerator : MonoBehaviour
     // 
     private void BuildAllGameObjectsFromBuffer()
     {
+        // We have to memorize and reset the parent scale
+        // so that the children get the proper scale when attached..
+        Vector3 vOldParentScale = m_ParentTransform.transform.localScale;
+        m_ParentTransform.transform.localScale = Vector3.one;
+
         // Verify the HeightBuffer's Size
         int nNumberOfVertices = m_nXSize * m_nYSize;
         //if (m_tBuffer.Length != nNumberOfVertices)
@@ -263,15 +269,15 @@ public class FractalSurfaceGenerator : MonoBehaviour
         float fYOffset = -(fYLength / 2.0f);
 
         // We need to calculate the ZMin/ZMax values
-        float fZMin = m_tBuffer[0];
-        float fZMax = m_tBuffer[0];
+        float fZMin = m_tFractalBuffer[0];
+        float fZMax = m_tFractalBuffer[0];
         for(int n = 0; n < nNumberOfVertices; n++)
         {
-            if (m_tBuffer[n] < fZMin)
-                fZMin = m_tBuffer[n];
+            if (m_tFractalBuffer[n] < fZMin)
+                fZMin = m_tFractalBuffer[n];
 
-            if (m_tBuffer[n] > fZMax)
-                fZMax = m_tBuffer[n];
+            if (m_tFractalBuffer[n] > fZMax)
+                fZMax = m_tFractalBuffer[n];
         }
                 
         // Spacing between two adjacent points in the buffer
@@ -298,6 +304,22 @@ public class FractalSurfaceGenerator : MonoBehaviour
                                             fXOffset, fYOffset, fZMin);
             }
         }
+
+        if(m_bAutoScale)
+        {
+            // AutoSCale modifies the scaling automatically, depending on the fractal dimension
+            // The lower the dimension, the higher the scale
+            float fZScale = 1 - m_fFractalDim;
+            //Mathf.Clamp(fZScale, 0.01f, 0.99f);
+            
+            // Values in [0.1, 0.9] 
+            fZScale = 0.1f + 0.8f * fZScale;
+
+            vOldParentScale.z = fZScale;
+        }
+
+        // We can now restore the parent scale
+        m_ParentTransform.transform.localScale = vOldParentScale;
     }
 
 
@@ -351,7 +373,7 @@ public class FractalSurfaceGenerator : MonoBehaviour
                 // Position
                 tVertexBuffer[nCurrentVertice].x = fXOffset + (nStartX + nX) * fXSpacing;       // X to [-50, 50]
                 tVertexBuffer[nCurrentVertice].y = fYOffset + (nStartY + nY) * fYSpacing;       // Y to [-50, 50]
-                float fZValue = m_tBuffer[(nStartX + nX) + (nStartY + nY) * m_nXSize];
+                float fZValue = m_tFractalBuffer[(nStartX + nX) + (nStartY + nY) * m_nXSize];
                 tVertexBuffer[nCurrentVertice].z = (fZValue - fZOffset) * fZSpacing;            // Z to [0, 100]
 
                 // Texture 1D
@@ -456,6 +478,44 @@ public class FractalSurfaceGenerator : MonoBehaviour
         m_tGameObjects.Add(goPlane);
     }
 
+
+
+    private void GenerateFractalSurface()
+    {
+        // Calculates the Size from the complexity
+        int nCurrentSize = (int)Mathf.Pow(2.0f, m_nComplexity) + 1;
+
+        // 2049 is the max size!
+        if (nCurrentSize > 2049)
+            nCurrentSize = 2049;
+
+        m_nXSize = nCurrentSize;
+        m_nYSize = nCurrentSize;
+
+        // Allocates the point buffer
+        //m_tBuffer = new float[m_nXSize * m_nYSize];
+            
+        if(m_bFirstSeed)
+        {
+            // Initialises the four corners of the buffer with random values
+            // This will "seed" the algorithm by giving us our first square
+            float fCoeff = Mathf.Pow(nCurrentSize, (1 - m_fFractalDim));
+            SetAt(0, 0, fracRandNum(fCoeff));
+            SetAt(0, nCurrentSize - 1, fracRandNum(fCoeff));
+            SetAt(nCurrentSize - 1, 0, fracRandNum(fCoeff));
+            SetAt(nCurrentSize - 1, nCurrentSize - 1, fracRandNum(fCoeff));
+        }
+
+
+        // Uses the Diamond-Square algorithm to add ever-increasing details to the Buffer
+        // until we cannot reduced the iteration size.  
+        while (nCurrentSize > 1)
+        {
+            DoDiamondSquareStep(nCurrentSize);
+            nCurrentSize /= 2;
+        }
+    }
+
     //
     // FracRandNum
     //
@@ -481,7 +541,7 @@ public class FractalSurfaceGenerator : MonoBehaviour
             return 0.0f;
         }            
 
-        return m_tBuffer[nIndex];
+        return m_tFractalBuffer[nIndex];
     }
 
     // 
@@ -496,7 +556,7 @@ public class FractalSurfaceGenerator : MonoBehaviour
         if ((nIndex < 0) || (nIndex >= (m_nXSize * m_nYSize)))
             return;
 
-        m_tBuffer[nIndex] = fValue;
+        m_tFractalBuffer[nIndex] = fValue;
     }
 
     //
