@@ -52,6 +52,11 @@ public class FractalSurfaceGenerator : MonoBehaviour
     // The meshes generated will be attached to it 
     public Transform    m_ParentTransform;
 
+    // Improved mesh
+    // Instead of building the mesh's quads along the same diagonal
+    // Adds a test to use the "best" diagonal to split the quad in 2
+    public bool         m_bBetterMeshSplitting = true;
+
     // Size of the result mesh
     // For now, XSize is always equal to YSize, and is (2^complexity)+1
     private int         m_nXSize;
@@ -117,7 +122,16 @@ public class FractalSurfaceGenerator : MonoBehaviour
 
             // Ignore the UI mesh timer
             m_fMeshTimer = 0.0f;
-        }            
+        }
+
+        // R will force rebuild the Mesh with the same parameteres (for debug)
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            // GetButtonDown is only called once
+            m_bMeshNeedsRecreate = true;
+            // Ignore the UI mesh timer
+            m_fMeshTimer = 0.0f;
+        }
 
         // Do we need to rebuild the mesh?
         // And is it possible to do it right now?
@@ -354,14 +368,55 @@ public class FractalSurfaceGenerator : MonoBehaviour
                 if (nX == 0 || nY == 0)
                     continue;
 
-                // Adds the 6 Indexes of the quad               
-                tIndexes[nCurrentIndex++] = (nX - 1) + (nY - 1) * nGridXSize;     // Bottom-Left
-                tIndexes[nCurrentIndex++] = nX + (nY - 1) * nGridXSize;           // Bottom-Right
-                tIndexes[nCurrentIndex++] = nX + nY * nGridXSize;                 // Top-Right
+                if(!m_bBetterMeshSplitting)
+                {
+                    // Adds the 6 Indexes of the quad
+                    //      D - C
+                    //      | \ |
+                    //      B - A          
+                    tIndexes[nCurrentIndex++] = nCurrentVertice - 1 - nGridXSize;   // D Top-Left
+                    tIndexes[nCurrentIndex++] = nCurrentVertice - nGridXSize;       // C Top-Right
+                    tIndexes[nCurrentIndex++] = nCurrentVertice;                    // A Bottom-Right
 
-                tIndexes[nCurrentIndex++] = nX + nY * nGridXSize;                 // Top-Right
-                tIndexes[nCurrentIndex++] = (nX - 1) + nY * nGridXSize;           // Top-Left
-                tIndexes[nCurrentIndex++] = (nX - 1) + (nY - 1) * nGridXSize;     // Bottom-Left
+                    tIndexes[nCurrentIndex++] = nCurrentVertice;                    // A Bottom-Right
+                    tIndexes[nCurrentIndex++] = nCurrentVertice - 1;                // B Bottom-Left
+                    tIndexes[nCurrentIndex++] = nCurrentVertice - 1 - nGridXSize;   // D Top-Left
+                }
+                else
+                {
+                    // We'll split the quad by using the diagonal with the smallest height difference
+                    //  if AD < BC                   if BC < AD           
+                    //      D - C                       D - C   
+                    //      | \ |                       | / |
+                    //      B - A                       B - A
+                    float fA = tVertexBuffer[nCurrentVertice].z;
+                    float fB = tVertexBuffer[nCurrentVertice-1].z;
+                    float fC = tVertexBuffer[nCurrentVertice - nGridXSize].z;
+                    float fD = tVertexBuffer[nCurrentVertice - 1 - nGridXSize].z;
+
+                    if(Mathf.Abs(fA - fD) < Mathf.Abs(fB - fC))
+                    {
+                        // Split with AD Diagonal DCA ABD
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1 - nGridXSize;   // D Top-Left
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - nGridXSize;       // C Top-Right
+                        tIndexes[nCurrentIndex++] = nCurrentVertice;                    // A Bottom-Right
+
+                        tIndexes[nCurrentIndex++] = nCurrentVertice;                    // A Bottom-Right
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1;                // B Bottom-Left
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1 - nGridXSize;   // D top-Lef
+                    }
+                    else
+                    {
+                        // Split with BC Diagonal DCB BCA
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1 - nGridXSize;   // D Top-Left
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - nGridXSize;       // C Top-Right
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1;                // B Bottom-Left
+
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - 1;                // B Bottom-Left
+                        tIndexes[nCurrentIndex++] = nCurrentVertice - nGridXSize;       // C Top-Right
+                        tIndexes[nCurrentIndex++] = nCurrentVertice;                    // A Bottom-Right
+                    }
+                }
             }
         }
 
