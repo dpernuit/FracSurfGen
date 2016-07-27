@@ -9,3 +9,9 @@
     RightClick pans the camera
     MouseWheel zooms in/out
     Shift+Click will scale the object along its Z-axis
+
+- VoronoiGenerator
+    Simple Voronoi diagram generator, using a maximum of 3 parameters.
+    Press "Space" to generate a new diagram.
+    Press "R" to rebuild the same diagram with new parameters (use the inspector).
+    Attach the script to a quad to display the diagram.
