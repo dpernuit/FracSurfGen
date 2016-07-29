@@ -61,13 +61,16 @@ public class ThermalErosion : MonoBehaviour
     //
     void Erode()
     {
-        // First we want to calculate the Threshold value corresponding to the percent threshold
         CalcErodeThresholdValue();
 
         // Erodes the buffer
         for (int i = 0; i < m_nIterations; i++)
         {
-            ErodeOnce();
+            // If no material was moved during a pass, it's useless to continue
+            float fMaterialRemoved = ErodeOnce();
+
+            if (fMaterialRemoved <= 0.0f)
+                break;
         }
     }
 
@@ -77,16 +80,20 @@ public class ThermalErosion : MonoBehaviour
     // ErodeOnce
     //
     //  Applies a Thermal Erosion once for every point in the buffer
+    //  Returns the total amount of material removed during this pass
     //
-    void ErodeOnce()
+    float ErodeOnce()
     {
+        float fTotalDiff = 0.0f;
         for (int nY = 0; nY < m_nYSize; nY++)
         {
             for (int nX = 0; nX < m_nXSize; nX++)
             {
-                ErodeOnePoint(nX, nY);
+                fTotalDiff += ErodeOnePoint(nX, nY);
             }
         }
+
+        return fTotalDiff;
     }
 
 
@@ -105,7 +112,7 @@ public class ThermalErosion : MonoBehaviour
     //      0.0 1.0 2.0   >   0.075 0.635 0.8
     //      0.0 0.0 0.8       0.075 0.075 0.8
     //
-    void ErodeOnePoint(int nX, int nY)
+    float ErodeOnePoint(int nX, int nY)
     {
         // We need to store the total, max and all the height differences for the neighbourhood
         float fMaxDiff = 0.0f;
@@ -179,6 +186,6 @@ public class ThermalErosion : MonoBehaviour
         }
 
         // Erode finish!
+        return fTotalDiff;
     }
-
 }
