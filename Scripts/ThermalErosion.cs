@@ -34,17 +34,13 @@ public class ThermalErosion : MonoBehaviour
 
 
 
-    //
-    // Erode
-    //
-    //  Erodes the buffer m_nIterations times
-    //
-    void Erode()
+    // CalcErodeThresholdValue
+    void CalcErodeThresholdValue()
     {
         // First we want to calculate the Threshold value corresponding to the percent threshold
         float fMin = m_tBuffer[0];
         float fMax = fMin;
-        for(int n = 1; n < (m_nXSize * m_nYSize); n++)
+        for (int n = 1; n < (m_nXSize * m_nYSize); n++)
         {
             if (m_tBuffer[n] > fMax)
                 fMax = m_tBuffer[n];
@@ -54,6 +50,19 @@ public class ThermalErosion : MonoBehaviour
 
         // Value = Range * Percent
         m_fThresholdValue = (fMax - fMin) * m_fThresholdPercent;
+    }
+
+
+
+    //
+    // Erode
+    //
+    //  Erodes the buffer m_nIterations times
+    //
+    void Erode()
+    {
+        // First we want to calculate the Threshold value corresponding to the percent threshold
+        CalcErodeThresholdValue();
 
         // Erodes the buffer
         for (int i = 0; i < m_nIterations; i++)
@@ -130,6 +139,9 @@ public class ThermalErosion : MonoBehaviour
                     if (fDiff > fMaxDiff)
                         fMaxDiff = fDiff;
                 }
+
+                // Next Neighbour!
+                n++;
             }
         }
 
@@ -145,21 +157,23 @@ public class ThermalErosion : MonoBehaviour
                     // Skip the current point
                     if ((nNeighbX == nX) && (nNeighbY == nY))
                     {
-                        //n++;
-                        //continue;
-
                         // Instead of skipping the current point, we remve the total quantity of material that's going to be removed
                         m_tBuffer[nX + nY * m_nXSize] -= 0.5f * (fMaxDiff - m_fThresholdValue);
                     }
+                    else
+                    {
+                        // Calculate the quantity of material to distribute to the neighbour
+                        float fDistribute = 0.5f * (fMaxDiff - m_fThresholdValue) * (tNeighbourDiff[n] / fTotalDiff);
 
-                    // Calculate the quantity of material to distribute to the neighbour
-                    float fDistribute = 0.5f * (fMaxDiff - m_fThresholdValue) * (tNeighbourDiff[n] / fTotalDiff);
+                        // Remove it from the current point
+                        //m_tBuffer[nX + nY * m_nXSize] -= fDistribute;
 
-                    // Remove it from the current point
-                    //m_tBuffer[nX + nY * m_nXSize] -= fDistribute;
+                        // then add it to the neighbour
+                        m_tBuffer[nNeighbX + nNeighbY * m_nXSize] += fDistribute;
+                    }
 
-                    // then add it to the neighbour
-                    m_tBuffer[nNeighbX + nNeighbY * m_nXSize] += fDistribute;
+                    // Next Neighbour!
+                    n++;
                 }
             }
         }
