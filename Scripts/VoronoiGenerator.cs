@@ -34,7 +34,17 @@ public class VoronoiGenerator : MonoBehaviour
     public float m_fC1 = -1.0f;
     public float m_fC2 = 1.0f;
     public float m_fC3 = 0.0f;
-    //public float m_fC4 = 1.0f;
+
+    // Ignores the 3rd parameters
+    public bool m_nUseOnly2Parameters = true;
+
+    // Perturbation intensity value (as % of size)
+    public float m_fPerturbationPercent;
+
+    // Number of zone for feature genearation
+    // if 0 or 1, all the features will be randomly place
+    // else the features will be spread across NxN zones
+    public int  m_nFeatureZone = 0;
 
     // All the featurePoints Position
     private Vector2[] m_tFeaturePoints;
@@ -87,7 +97,7 @@ public class VoronoiGenerator : MonoBehaviour
 	}
 
     //
-    // FracRandNum
+    // RandNum
     //
     //  Returns a RandomNumber between (0, fMax)
     //
@@ -96,6 +106,16 @@ public class VoronoiGenerator : MonoBehaviour
         return (float)(m_RNG.NextDouble() * fMax);
     }
 
+
+    //
+    // RandNumMirror
+    //
+    //  Returns a RandomNumber between (-fVal, fVal)
+    //
+    private float RandNumMirror(float fVal)
+    {
+        return (float)((m_RNG.NextDouble() * 2.0) - 1.0) * fVal;
+    }
 
     void Generate()
     {
@@ -108,12 +128,14 @@ public class VoronoiGenerator : MonoBehaviour
         // 2. Fills the buffer with the Voronoi Diagram
         GenerateVoronoi();
 
-        // 3. Applies the material to the Quad
+        // 3. Applies a perturbation filtering to the voronoi diagram
+        ApplyPerturbationFiltering();
+
+        // 4. Applies the material to the Quad
         VoronoiToTexture();
 
         m_bNeedsRecreate = false;
     }
-
 
     // Random places features on the buffer
     void GenerateFeaturePoints()
@@ -121,14 +143,63 @@ public class VoronoiGenerator : MonoBehaviour
         if (m_nNumberOfFeatures < 1)
             return;
 
+        if ((m_nXSize < 2) || (m_nYSize < 2))
+            return;
+
         // Initialises the Array
         m_tFeaturePoints = new Vector2[m_nNumberOfFeatures];
 
-        for (int n = 0; n < m_nNumberOfFeatures; n++)
+        if(m_nFeatureZone < 2)
         {
-            // Generates Random feature
-            m_tFeaturePoints[n].x = RandNum(m_nXSize-1);
-            m_tFeaturePoints[n].y = RandNum(m_nYSize-1);
+            // Generates Random features
+            for (int n = 0; n < m_nNumberOfFeatures; n++)
+            {   
+                m_tFeaturePoints[n].x = RandNum(m_nXSize - 1);
+                m_tFeaturePoints[n].y = RandNum(m_nYSize - 1);
+            }
+        }
+        else
+        {
+            // The random features will be spread across zones
+            float fZoneXSize = m_nXSize / m_nFeatureZone;
+            float fZoneYSize = m_nYSize / m_nFeatureZone;
+
+            // Calculates the theoretical number of feature per Zone
+            float fFeaturePerZone = m_nNumberOfFeatures / (m_nFeatureZone * m_nFeatureZone);
+
+            // After this limit, we have to move to the next zone
+            int nNextZoneLimit = Mathf.CeilToInt(fFeaturePerZone);
+
+            // Generates Random features according to a Zone size and spread them through all the zones
+            int nCurrentZoneX = 0, nCurrentZoneY = 0;
+            float fCurrentXOffset = 0.0f, fCurrentYOffset = 0.0f;
+            for (int n = 0; n < m_nNumberOfFeatures; n++)
+            {
+                if(n > nNextZoneLimit)
+                {
+                    // Increase the limit
+                    nNextZoneLimit += Mathf.FloorToInt(fFeaturePerZone);
+
+                    nCurrentZoneX++;
+                    if(nCurrentZoneX < m_nFeatureZone)
+                    {
+                        // Move to the next zone
+                        fCurrentXOffset += fZoneXSize;
+                    }
+                    else
+                    {
+                        // Move to a new zone line
+                        nCurrentZoneY++;
+                        nCurrentZoneX = 0;
+
+                        fCurrentXOffset = 0.0f;
+                        fCurrentYOffset += fZoneYSize;
+                    }
+                }
+
+                m_tFeaturePoints[n].x = fCurrentXOffset + RandNum(fZoneXSize);
+                m_tFeaturePoints[n].y = fCurrentYOffset + RandNum(fZoneYSize);
+            }
         }
     }
 
@@ -139,24 +210,104 @@ public class VoronoiGenerator : MonoBehaviour
         // Allocates the array
         m_tVoronoiBuffer = new float[m_nXSize * m_nYSize];
 
-        // For each point in the array
+        if(m_nUseOnly2Parameters)
+        {
+            // For each point in the array
+            for (int nY = 0; nY < m_nYSize; nY++)
+            {
+                for (int nX = 0; nX < m_nXSize; nX++)
+                {
+                    // Get the two closest distance
+
+                    float fD1 = 0.0f, fD2 = 0.0f;
+                    Get2ClosestFeatureDistances(nX, nY, ref fD1, ref fD2);
+
+                    // Calculate the voronoi value c1d1 + c2d2
+                    m_tVoronoiBuffer[nX + nY * m_nXSize] = m_fC1 * fD1 + m_fC2 * fD2;
+                }
+            }
+        }
+        else
+        {
+            // For each point in the array
+            for (int nY = 0; nY < m_nYSize; nY++)
+            {
+                for (int nX = 0; nX < m_nXSize; nX++)
+                {
+                    // Get the two closest distance
+
+                    float fD1 = 0.0f, fD2 = 0.0f, fD3 = 0.0f;
+                    Get3ClosestFeatureDistances(nX, nY, ref fD1, ref fD2, ref fD3);
+
+                    // Calculate the voronoi value c1d1 + c2d2
+                    m_tVoronoiBuffer[nX + nY * m_nXSize] = m_fC1 * fD1 + m_fC2 * fD2 + m_fC3 * fD3;
+                }
+            }
+        }        
+    }
+
+
+    void ApplyPerturbationFiltering()
+    {
+        if (m_fPerturbationPercent <= 0)
+            return;
+
+        // Calculates the maximum displacement in Pixel
+        float fMaxPerturbationX = m_fPerturbationPercent * m_nXSize;
+        float fMaxPerturbationY = m_fPerturbationPercent * m_nYSize;
+
+        // We need to copy the current buffer to apply the perturbation filter
+        float[] tBufferCopy = new float[m_nXSize * m_nYSize];
+        System.Array.Copy(m_tVoronoiBuffer, tBufferCopy, m_nXSize * m_nYSize);
+
+        // 
         for(int nY = 0; nY < m_nYSize; nY++)
         {
             for(int nX = 0; nX < m_nXSize; nX++)
             {
-                // Get the two closest distance
-                float fD1 = 0.0f, fD2 = 0.0f, fD3 = 0.0f;
-                GetClosestFeatureDistances(nX, nY, ref fD1, ref fD2, ref fD3);
+                // Use the perturbation factor to calculate a new X/Y
+                int nNewX = (int)(nX + RandNumMirror(fMaxPerturbationX));
+                int nNewY = (int)(nY + RandNumMirror(fMaxPerturbationY));
 
-                // Calculate the voronoi value c1d1 + c2d2
-                m_tVoronoiBuffer[nX + nY * m_nXSize] = m_fC1 * fD1 + m_fC2 * fD2 + m_fC3 * fD3;
+                nNewX = Mathf.Clamp(nNewX, 0, m_nXSize - 1);
+                nNewY = Mathf.Clamp(nNewY, 0, m_nYSize - 1);
+
+                // Copy the data from the (newX, newY) to (nX, nY)
+                m_tVoronoiBuffer[nX + nY * m_nXSize] = tBufferCopy[nNewX + nNewY * m_nXSize];
             }
         }
     }
 
 
+    // Return the 2 smallest distance for the current point
+    void Get2ClosestFeatureDistances(int nX, int nY, ref float fD1, ref float fD2)
+    {
+        // Initialisation
+        Vector2 vPos = new Vector2(nX, nY);
+        fD1 = GetSqrDistanceToFeature(vPos, 0);
+        fD2 = fD1;
+
+        // Get the two minimum distances
+        for (int n = 1; n < m_nNumberOfFeatures; n++)
+        {
+            float fDist = GetSqrDistanceToFeature(vPos, n);
+            if ((fDist < 0.0f) || (fDist > fD2))
+                continue;
+
+            if (fDist < fD1)
+            {
+                fD2 = fD1;
+                fD1 = fDist;
+            }
+            else
+            {
+                fD2 = fDist;
+            }
+        }
+    }
+
     // Return the 3 smallest Distance for the current point
-    void GetClosestFeatureDistances(int nX, int nY, ref float fD1, ref float fD2, ref float fD3)
+    void Get3ClosestFeatureDistances(int nX, int nY, ref float fD1, ref float fD2, ref float fD3)
     {
         // Initialisation
         Vector2 vPos = new Vector2(nX, nY);
@@ -164,7 +315,7 @@ public class VoronoiGenerator : MonoBehaviour
         fD2 = fD1;
         fD3 = fD1;
 
-        // Get the two minimum distances
+        // Get the three minimum distances
         for(int n = 1; n < m_nNumberOfFeatures; n++)
         {
             float fDist = GetSqrDistanceToFeature(vPos, n);
@@ -190,10 +341,6 @@ public class VoronoiGenerator : MonoBehaviour
                 fD3 = fDist;
             }
         }
-
-        // We used squared distance, so we need to sqrt them
-        //fD1 = Mathf.Sqrt(fD1);
-        //fD2 = Mathf.Sqrt(fD2);
     }
 
 
@@ -221,10 +368,6 @@ public class VoronoiGenerator : MonoBehaviour
                 fMin = m_tVoronoiBuffer[n];
         }
 
-        // If thresholding, only positive values are taken into account
-        //if (m_bThreshold)
-        //    fMin = 0.0f;
-
         // Creates a texture
         Texture2D texture = new Texture2D(m_nXSize, m_nYSize);
         // For each point in the array
@@ -232,13 +375,17 @@ public class VoronoiGenerator : MonoBehaviour
         {
             for (int nX = 0; nX < m_nXSize; nX++)
             {
+                // Calculates the value from [min, max] to [0, 1]
                 float fCurrentValue = (m_tVoronoiBuffer[nX + nY * m_nXSize] - fMin) / (fMax - fMin);
                 texture.SetPixel(nX, nY, new Color(fCurrentValue, fCurrentValue, fCurrentValue));
             }
         }
 
+        // Apply the modifications made by the setPixel calls to the texture
         texture.Apply();
 
-        GetComponent<Renderer>().material.mainTexture = texture;
+        // Apply the texture to the current render
+        if(GetComponent<Renderer>() != null)
+            GetComponent<Renderer>().material.mainTexture = texture;
     }
 }
